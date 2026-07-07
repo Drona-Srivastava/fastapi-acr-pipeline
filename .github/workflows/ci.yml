@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   test:
-    name: Run Application Tests
+    name: Test, Build and Verify Application
     runs-on: ubuntu-latest
 
     steps:
@@ -35,3 +35,14 @@ jobs:
 
       - name: Run tests
         run: uv run pytest -v
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            -t url-shortener:${{ github.sha }} \
+            .
+
+      - name: Run container smoke tests
+        env:
+          IMAGE_NAME: url-shortener:${{ github.sha }}
+        run: ./scripts/container-smoke-test.sh
