@@ -41,7 +41,25 @@ jobs:
           docker build \
             -t url-shortener:${{ github.sha }} \
             .
+    
+      - name: Tag Docker image
+        run: |
+          SHORT_SHA="${GITHUB_SHA::7}"
 
+          docker tag \
+            url-shortener:${{ github.sha }} \
+            url-shortener:build-${{ github.run_number }}
+
+          docker tag \
+            url-shortener:${{ github.sha }} \
+            url-shortener:sha-${SHORT_SHA}
+
+          echo "Created image tags:"
+          echo "url-shortener:build-${{ github.run_number }}"
+          echo "url-shortener:sha-${SHORT_SHA}"
+
+          docker image ls url-shortener
+      
       - name: Run container smoke tests
         env:
           IMAGE_NAME: url-shortener:${{ github.sha }}
