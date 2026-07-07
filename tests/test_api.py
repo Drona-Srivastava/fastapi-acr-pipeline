@@ -2,19 +2,32 @@ import pytest
 
 from fastapi.testclient import TestClient
 
-from app.main import app, items
+from app.main import app, url_store
 
 
 client = TestClient(app)
 
 
 @pytest.fixture(autouse=True)
-def clear_items():
-    items.clear()
+def clear_url_store():
+    url_store.clear()
 
     yield
 
-    items.clear()
+    url_store.clear()
+
+
+def create_test_url(url: str = "https://example.com"):
+    response = client.post(
+        "/urls",
+        json={
+            "url": url,
+        },
+    )
+
+    assert response.status_code == 201
+
+    return response.json()
 
 
 def test_root():
@@ -23,7 +36,8 @@ def test_root():
     assert response.status_code == 200
 
     assert response.json() == {
-        "message": "FastAPI application is running"
+        "service": "URL Shortener API",
+        "version": "1.0.0",
     }
 
 
@@ -33,106 +47,158 @@ def test_health():
     assert response.status_code == 200
 
     assert response.json() == {
-        "status": "healthy"
+        "status": "healthy",
+        "service": "url-shortener",
+        "version": "1.0.0",
     }
 
 
-def test_get_empty_items():
-    response = client.get("/items")
-
-    assert response.status_code == 200
-    assert response.json() == {}
-
-
-def test_create_item():
+def test_create_short_url():
     response = client.post(
-        "/items/1",
+        "/urls",
         json={
-            "name": "Keyboard",
-            "price": 1500,
+            "url": "https://example.com",
         },
     )
 
     assert response.status_code == 201
 
-    assert response.json() == {
-        "name": "Keyboard",
-        "price": 1500.0,
-    }
+    body = response.json()
+
+    assert "short_code" in body
+    assert "short_url" in body
+
+    assert body["original_url"] == "https://example.com/"
 
 
-def test_get_item():
-    client.post(
-        "/items/1",
-        json={
-            "name": "Mouse",
-            "price": 500,
-        },
-    )
-
-    response = client.get("/items/1")
-
-    assert response.status_code == 200
-
-    assert response.json() == {
-        "name": "Mouse",
-        "price": 500.0,
-    }
-
-
-def test_get_missing_item():
-    response = client.get("/items/999")
-
-    assert response.status_code == 404
-
-    assert response.json() == {
-        "detail": "Item not found"
-    }
-
-
-def test_duplicate_item():
-    payload = {
-        "name": "Monitor",
-        "price": 10000,
-    }
-
-    client.post("/items/1", json=payload)
-
+def test_create_invalid_url():
     response = client.post(
-        "/items/1",
-        json=payload,
-    )
-
-    assert response.status_code == 409
-
-    assert response.json() == {
-        "detail": "Item already exists"
-    }
-
-
-def test_delete_item():
-    client.post(
-        "/items/1",
+        "/urls",
         json={
-            "name": "Laptop",
-            "price": 60000,
+            "url": "not-a-valid-url",
         },
     )
 
-    response = client.delete("/items/1")
+    assert response.status_code == 422
+
+
+def test_list_urls():
+    created = create_test_url()
+
+    response = client.get("/urls")
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert created["short_code"] in body
+
+
+def test_get_url_info():
+    created = create_test_url()
+
+    short_code = created["short_code"]
+
+    response = client.get(
+        f"/urls/{short_code}"
+    )
 
     assert response.status_code == 200
 
     assert response.json() == {
-        "message": "Item deleted"
+        "short_code": short_code,
+        "original_url": "https://example.com/",
+        "clicks": 0,
     }
 
 
-def test_delete_missing_item():
-    response = client.delete("/items/999")
+def test_get_missing_url():
+    response = client.get(
+        "/urls/not-found"
+    )
 
     assert response.status_code == 404
 
     assert response.json() == {
-        "detail": "Item not found"
+        "detail": "Short URL not found"
     }
+
+
+def test_redirect():
+    created = create_test_url()
+
+    short_code = created["short_code"]
+
+    response = client.get(
+        f"/{short_code}",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 307
+
+    assert response.headers["location"] == (
+        "https://example.com/"
+    )
+
+
+def test_redirect_increments_clicks():
+    created = create_test_url()
+
+    short_code = created["short_code"]
+
+    client.get(
+        f"/{short_code}",
+        follow_redirects=False,
+    )
+
+    client.get(
+        f"/{short_code}",
+        follow_redirects=False,
+    )
+
+    response = client.get(
+        f"/urls/{short_code}"
+    )
+
+    assert response.json()["clicks"] == 2
+
+
+def test_missing_redirect():
+    response = client.get(
+        "/does-not-exist",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 404
+
+
+def test_delete_short_url():
+    created = create_test_url()
+
+    short_code = created["short_code"]
+
+    response = client.delete(
+        f"/urls/{short_code}"
+    )
+
+    assert response.status_code == 200
+
+    assert response.json() == {
+        "message": "Short URL deleted"
+    }
+
+
+def test_deleted_url_is_not_accessible():
+    created = create_test_url()
+
+    short_code = created["short_code"]
+
+    client.delete(
+        f"/urls/{short_code}"
+    )
+
+    response = client.get(
+        f"/urls/{short_code}"
+    )
+
+    assert response.status_code == 404
