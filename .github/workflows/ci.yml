@@ -64,3 +64,12 @@ jobs:
         env:
           IMAGE_NAME: url-shortener:${{ github.sha }}
         run: ./scripts/container-smoke-test.sh
+
+      - name: Scan Docker image for vulnerabilities
+        uses: aquasecurity/trivy-action@master
+        with:
+            image-ref: url-shortener:${{ github.sha}}
+            format: table
+            severity: CRITICAL
+            ignore-unfixed: true
+            exit-code: "1"
